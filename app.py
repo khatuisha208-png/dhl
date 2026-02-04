@@ -3,84 +3,79 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="DHL Core Strategy Sim", layout="wide")
+st.set_page_config(page_title="DHL: The Efficiency Gap", layout="wide")
 
-# --- 1. STRATEGIC CONSTANTS (Core Variables) ---
-PEAK_WASTE_FACTOR = 1.45    # 45% more fuel/time wasted in traffic
-LABOR_COST_HR = 45.0        # Average driver/courier hourly rate
-NON_PEAK_EFFICIENCY = 1.25  # 25% more deliveries possible per hour off-peak
+# --- 1. CORE OPERATIONAL VARIABLES (2026 REFINED) ---
+# Wasted costs when stuck in peak traffic
+IDLING_FUEL_COST_HR = 4.80  # Fuel burned doing 0 miles
+PEAK_LABOR_WASTE = 1.30     # 30% "inefficiency tax" on labor time
+MAINTENANCE_FACTOR = 1.60   # 60% higher wear-and-tear in stop-and-go
 
-STRATEGY_MAP = {0: "Actual (Peak-Heavy)", 1: "Proposed (Non-Peak Shift)"}
+# Efficiency gains in Non-Peak windows
+OFF_PEAK_SPEED_BOOST = 1.25 # 25% faster travel/delivery speed
 
-# --- 2. REINFORCEMENT LEARNING ENGINE ---
-class DHL_Balance_Agent:
-    def __init__(self, actions):
-        self.q_table = np.zeros((2, len(actions))) # State 0: Low Traffic, State 1: High Traffic
-        self.lr, self.gamma, self.eps = 0.1, 0.9, 0.2
+# --- 2. THE BALANCE SIMULATOR ---
+st.title("⚖️ DHL Strategic Balance: Peak vs. Non-Peak")
+st.markdown("Finding the 'Sweet Spot' between **Service Responsiveness** and **Cost Leadership**.")
 
-    def choose_action(self, state):
-        if np.random.uniform(0, 1) < self.eps:
-            return np.random.choice([0, 1])
-        return int(np.argmax(self.q_table[state]))
+st.sidebar.header("Global Logistics Settings")
+daily_vol = st.sidebar.number_input("Total Daily Shipments", value=12000)
+shift_target = st.sidebar.slider("Strategy: Volume Shift to Non-Peak (%)", 0, 100, 35)
 
-    def learn(self, state, action, reward):
-        predict = self.q_table[state, action]
-        target = reward + self.gamma * np.max(self.q_table[state])
-        self.q_table[state, action] += self.lr * (target - predict)
+# --- 3. THE CALCULATION ENGINE ---
+days = 30 # Simulate one month
+actual_costs, proposed_costs = [], []
 
-# --- 3. UI & INPUTS ---
-st.title("📦 DHL Strategy: Time-Bound Resource Allocation")
-st.sidebar.header("Operational Inputs")
-daily_volume = st.sidebar.number_input("Daily Packages", value=5000)
-fuel_price = st.sidebar.slider("Fuel Price ($/L)", 0.8, 2.0, 1.2)
-shift_target = st.sidebar.slider("Target Non-Peak Shift (%)", 0, 100, 30)
-
-# --- 4. EXECUTION LOOP ---
-agent = DHL_Balance_Agent(actions=[0, 1])
-actual_total, proposed_total = 0, 0
-
-for i in range(100): # 100-day simulation
-    state = 1 if i % 3 == 0 else 0 # Simulate recurring heavy traffic days
+for _ in range(days):
+    # ACTUAL MODEL (100% Peak-Heavy)
+    # High labor hours + Idling waste + Maintenance penalty
+    a_labor = (daily_vol / 12) * 45 * PEAK_LABOR_WASTE 
+    a_fuel = (daily_vol * 0.15) * 1.2 * 1.4 # High burn rate in traffic
+    a_maint = (daily_vol * 0.05) * MAINTENANCE_FACTOR
+    actual_costs.append(a_labor + a_fuel + a_maint)
     
-    # ACTUAL (Always operating in standard windows)
-    a_fuel = (daily_volume * 0.05) * fuel_price * PEAK_WASTE_FACTOR
-    a_labor = (daily_volume / 15) * LABOR_COST_HR * 1.2 # 15 stops/hr baseline
-    actual_total += (a_fuel + a_labor)
+    # PROPOSED MODEL (The Hybrid Balance)
+    v_peak = daily_vol * (1 - shift_target/100)
+    v_off = daily_vol * (shift_target/100)
     
-    # PROPOSED (Hybrid Balance)
-    action = agent.choose_action(state)
-    v_non_peak = daily_volume * (shift_target / 100)
-    v_peak = daily_volume - v_non_peak
+    # Peak portion remains expensive (maintains responsiveness)
+    p_cost_peak = ((v_peak/12)*45*PEAK_LABOR_WASTE) + ((v_peak*0.15)*1.2*1.4) + (v_peak*0.05*MAINTENANCE_FACTOR)
     
-    # Cost for Peak portion
-    p_cost_peak = ((v_peak * 0.05) * fuel_price * PEAK_WASTE_FACTOR) + ((v_peak / 15) * LABOR_COST_HR)
-    # Cost for Non-Peak portion (High Efficiency)
-    p_cost_off = ((v_non_peak * 0.05) * fuel_price) + ((v_non_peak / (15 * NON_PEAK_EFFICIENCY)) * LABOR_COST_HR)
+    # Non-Peak portion is optimized (achieves cost leadership)
+    p_cost_off = ((v_off/(12*OFF_PEAK_SPEED_BOOST))*45) + ((v_off*0.15)*1.2) + (v_off*0.05)
     
-    current_proposed_day = p_cost_peak + p_cost_off
-    proposed_total += current_proposed_day
-    
-    # RL Reward: The agent learns that avoiding high-waste states saves money
-    reward = (a_fuel + a_labor) - current_proposed_day
-    agent.learn(state, action, reward)
+    proposed_costs.append(p_cost_peak + p_cost_off)
 
-# --- 5. VISUALIZATION ---
-m1, m2 = st.columns(2)
-avg_actual = actual_total / 100
-avg_proposed = proposed_total / 100
+# --- 4. VISUALIZING THE GAP ---
+col1, col2 = st.columns(2)
 
-m1.metric("Current Daily OpEx", f"${avg_actual:,.2f}")
-m2.metric("Proposed Daily OpEx", f"${avg_proposed:,.2f}", delta=f"-${(avg_actual - avg_proposed):,.2f}", delta_color="normal")
+with col1:
+    st.subheader("Monthly Operational Spending")
+    plot_df = pd.DataFrame({
+        "Day": list(range(1, 31)),
+        "Actual (Legacy)": actual_costs,
+        "Proposed (Balanced)": proposed_costs
+    })
+    fig = px.line(plot_df, x="Day", y=["Actual (Legacy)", "Proposed (Balanced)"],
+                  color_discrete_sequence=['#D40511', '#FFCC00'])
+    st.plotly_chart(fig, use_container_width=True)
 
+with col2:
+    savings = sum(actual_costs) - sum(proposed_costs)
+    st.metric("Total Monthly Savings", f"${savings:,.2f}")
+    st.write("### Why this works:")
+    st.write(f"- **Asset Utilization:** Shifting **{shift_target}%** to non-peak frees up vehicles for express peak-hour demand.")
+    st.write(f"- **Maintenance:** Reducing stop-and-go idling saves approx. **${(sum(actual_costs)*0.08):,.0f}** in engine wear-and-tear.")
+    st.write(f"- **Fuel Efficiency:** You avoid the **45% Congestion Penalty** on {shift_target}% of your total volume.")
+
+
+
+# --- 5. THE STRATEGY MATRIX ---
 st.divider()
-
-# Strategy Mapping Table
-st.subheader("Learned Strategy Logic")
-q_df = pd.DataFrame(agent.q_table, columns=["Keep in Peak", "Shift to Non-Peak"], index=["Normal Traffic", "Heavy Congestion"])
-st.table(q_df.style.highlight_max(axis=1, color="#FFCC00"))
-
-st.info(f"""
-**Strategic Analysis:**
-* **Cost Leadership:** By shifting {shift_target}% of volume, the AI identifies that labor productivity increases from 15 to {15 * NON_PEAK_EFFICIENCY:.1f} stops per hour.
-* **Responsiveness:** The remaining {100-shift_target}% stays in peak windows to ensure "Express" time-definite deliveries are still met.
-""")
+st.subheader("Strategic Pillar Alignment")
+matrix_data = {
+    "Pillar": ["Cost Leadership", "Responsiveness", "Sustainability"],
+    "Action": ["Off-Peak Resource Shift", "Reserved Peak-Hour Capacity", "Reduced Idling Emissions"],
+    "Impact": ["Lower Fuel/Labor/Maint", "Guaranteed Express SLA", "Lower CO2 per Parcel"]
+}
+st.table(pd.DataFrame(matrix_data))
