@@ -3,79 +3,93 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="DHL: The Efficiency Gap", layout="wide")
+st.set_page_config(page_title="DHL Advanced Strategy Sim", layout="wide")
 
-# --- 1. CORE OPERATIONAL VARIABLES (2026 REFINED) ---
-# Wasted costs when stuck in peak traffic
-IDLING_FUEL_COST_HR = 4.80  # Fuel burned doing 0 miles
-PEAK_LABOR_WASTE = 1.30     # 30% "inefficiency tax" on labor time
-MAINTENANCE_FACTOR = 1.60   # 60% higher wear-and-tear in stop-and-go
+# --- 1. STRATEGIC CONSTANTS (2026 DATA) ---
+PEAK_SURCHARGE = 0.67       # Per package cost during peak
+SAF_PREMIUM = 0.22          # Extra cost per kg for GoGreen Plus
+MAINTENANCE_WASTE = 1.60    # 60% increase in wear/tear during peak
 
-# Efficiency gains in Non-Peak windows
-OFF_PEAK_SPEED_BOOST = 1.25 # 25% faster travel/delivery speed
+STRATEGY_MAP = {0: "Actual (Peak-Heavy)", 1: "Proposed (Hybrid/Time-Bound)"}
 
-# --- 2. THE BALANCE SIMULATOR ---
-st.title("⚖️ DHL Strategic Balance: Peak vs. Non-Peak")
-st.markdown("Finding the 'Sweet Spot' between **Service Responsiveness** and **Cost Leadership**.")
-
-st.sidebar.header("Global Logistics Settings")
-daily_vol = st.sidebar.number_input("Total Daily Shipments", value=12000)
-shift_target = st.sidebar.slider("Strategy: Volume Shift to Non-Peak (%)", 0, 100, 35)
-
-# --- 3. THE CALCULATION ENGINE ---
-days = 30 # Simulate one month
-actual_costs, proposed_costs = [], []
-
-for _ in range(days):
-    # ACTUAL MODEL (100% Peak-Heavy)
-    # High labor hours + Idling waste + Maintenance penalty
-    a_labor = (daily_vol / 12) * 45 * PEAK_LABOR_WASTE 
-    a_fuel = (daily_vol * 0.15) * 1.2 * 1.4 # High burn rate in traffic
-    a_maint = (daily_vol * 0.05) * MAINTENANCE_FACTOR
-    actual_costs.append(a_labor + a_fuel + a_maint)
+# --- 2. ENHANCED SIMULATION ENGINE ---
+def run_advanced_sim(vol, off_peak_pct, fuel_price, saf_adoption):
+    days = 30 # Simulation for one operational month
+    actual_total, proposed_total = 0, 0
+    actual_co2, proposed_co2 = 0, 0
     
-    # PROPOSED MODEL (The Hybrid Balance)
-    v_peak = daily_vol * (1 - shift_target/100)
-    v_off = daily_vol * (shift_target/100)
-    
-    # Peak portion remains expensive (maintains responsiveness)
-    p_cost_peak = ((v_peak/12)*45*PEAK_LABOR_WASTE) + ((v_peak*0.15)*1.2*1.4) + (v_peak*0.05*MAINTENANCE_FACTOR)
-    
-    # Non-Peak portion is optimized (achieves cost leadership)
-    p_cost_off = ((v_off/(12*OFF_PEAK_SPEED_BOOST))*45) + ((v_off*0.15)*1.2) + (v_off*0.05)
-    
-    proposed_costs.append(p_cost_peak + p_cost_off)
+    for _ in range(days):
+        # BASE COSTS (Standard)
+        base_labor = 45 * 8 # 8 hour shift
+        base_fuel = (vol * 0.1) * fuel_price # 0.1 liters per pkg avg
+        
+        # --- ACTUAL (100% Peak Operations) ---
+        # Penalties: Peak Surcharges + Maintenance + Traffic Idling
+        a_cost = (base_labor * 1.3) + (base_fuel * 1.5) + (vol * PEAK_SURCHARGE)
+        a_cost *= MAINTENANCE_WASTE # Apply wear-and-tear
+        actual_total += a_cost
+        actual_co2 += vol * 0.25 * 1.2 # Peak traffic burns 20% more fuel
+        
+        # --- PROPOSED (The Balanced Shift) ---
+        # Volume split: some in Peak, some in Off-Peak
+        v_peak = vol * (1 - off_peak_pct/100)
+        v_off = vol * (off_peak_pct/100)
+        
+        # Off-Peak saves on surcharges and fuel waste
+        p_cost_peak = (v_peak * PEAK_SURCHARGE) + ((base_labor/2) * 1.3) + ((base_fuel/2) * 1.5)
+        p_cost_off = (v_off * 0) + ((base_labor/2) * 1.0) + ((base_fuel/2) * 1.0)
+        
+        # Sustainability Adjustment (SAF)
+        saf_cost = (vol * saf_adoption/100) * SAF_PREMIUM
+        
+        proposed_total += (p_cost_peak + p_cost_off + saf_cost)
+        
+        # CO2: SAF reduces emissions by 80% for the adopted volume
+        p_co2_clean = (vol * saf_adoption/100) * 0.05
+        p_co2_dirty = (vol * (1 - saf_adoption/100)) * 0.25 * (1 - (off_peak_pct/100)*0.15)
+        proposed_co2 += (p_co2_clean + p_co2_dirty)
 
-# --- 4. VISUALIZING THE GAP ---
-col1, col2 = st.columns(2)
+    return actual_total, proposed_total, actual_co2, proposed_co2
 
-with col1:
-    st.subheader("Monthly Operational Spending")
-    plot_df = pd.DataFrame({
-        "Day": list(range(1, 31)),
-        "Actual (Legacy)": actual_costs,
-        "Proposed (Balanced)": proposed_costs
-    })
-    fig = px.line(plot_df, x="Day", y=["Actual (Legacy)", "Proposed (Balanced)"],
-                  color_discrete_sequence=['#D40511', '#FFCC00'])
-    st.plotly_chart(fig, use_container_width=True)
+# --- 3. UI LAYOUT ---
+st.title("📊 DHL 2026 Strategic Value Simulator")
+st.sidebar.header("Global Variables")
+vol = st.sidebar.number_input("Daily Volume", value=10000)
+fuel = st.sidebar.slider("Fuel Market Price ($/L)", 0.8, 2.5, 1.2)
 
-with col2:
-    savings = sum(actual_costs) - sum(proposed_costs)
-    st.metric("Total Monthly Savings", f"${savings:,.2f}")
-    st.write("### Why this works:")
-    st.write(f"- **Asset Utilization:** Shifting **{shift_target}%** to non-peak frees up vehicles for express peak-hour demand.")
-    st.write(f"- **Maintenance:** Reducing stop-and-go idling saves approx. **${(sum(actual_costs)*0.08):,.0f}** in engine wear-and-tear.")
-    st.write(f"- **Fuel Efficiency:** You avoid the **45% Congestion Penalty** on {shift_target}% of your total volume.")
+st.sidebar.header("Proposed Strategy Levers")
+off_peak = st.sidebar.slider("Off-Peak Volume Shift (%)", 0, 100, 40)
+saf = st.sidebar.slider("SAF (GoGreen Plus) Adoption (%)", 0, 100, 30)
 
+a_val, p_val, a_co2, p_co2 = run_advanced_sim(vol, off_peak, fuel, saf)
 
+# --- 4. DISPLAY RESULTS ---
+m1, m2, m3 = st.columns(3)
+m1.metric("Financial Delta (Monthly)", f"${(a_val - p_val):,.2f}", delta="Cost Saved")
+m2.metric("CO2 Mitigation", f"{((a_co2 - p_co2)/a_co2)*100:.1f}%", delta="Green Impact")
+m3.metric("Response Score", f"{100 - (off_peak*0.5):.0f}/100", help="Score drops if too much is moved off-peak (Responsiveness risk)")
 
-# --- 5. THE STRATEGY MATRIX ---
 st.divider()
-st.subheader("Strategic Pillar Alignment")
-matrix_data = {
-    "Pillar": ["Cost Leadership", "Responsiveness", "Sustainability"],
-    "Action": ["Off-Peak Resource Shift", "Reserved Peak-Hour Capacity", "Reduced Idling Emissions"],
-    "Impact": ["Lower Fuel/Labor/Maint", "Guaranteed Express SLA", "Lower CO2 per Parcel"]
-}
-st.table(pd.DataFrame(matrix_data))
+
+# Comparison Graph
+fin_df = pd.DataFrame({
+    "Category": ["Actual (Legacy)", "Proposed (Refined)"],
+    "Monthly OpEx ($)": [a_val, p_val],
+    "Carbon Footprint (kg)": [a_co2, p_co2]
+})
+
+fig = px.bar(fin_df, x="Category", y="Monthly OpEx ($)", color="Category", 
+             color_discrete_map={"Actual (Legacy)": "#D40511", "Proposed (Refined)": "#FFCC00"})
+st.plotly_chart(fig, use_container_width=True)
+
+st.subheader("Strategy Pillar Breakdown")
+tabs = st.tabs(["Cost Leadership", "Responsiveness", "Differentiation"])
+with tabs[0]:
+    st.write("**Variable:** Maintenance & Fuel Idling.")
+    st.info(f"By shifting {off_peak}% to off-peak, you reduced wear-and-tear costs by approx. ${ (a_val * 0.15 * off_peak/100):,.0f} per month.")
+with tabs[1]:
+    st.write("**Variable:** Peak Surcharges & SLAs.")
+    st.success(f"Reserved {100-off_peak}% capacity for 'Express' ensures DHL retains its premium speed service.")
+with tabs[2]:
+    st.write("**Variable:** GoGreen Plus (SAF).")
+    st.warning(f"Insetting {saf}% SAF differentiates DHL from competitors who only use carbon offsets.")
