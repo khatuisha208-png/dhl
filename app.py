@@ -1,92 +1,85 @@
-import streamlit as st
+ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="DHL Financial Strategy Sim", layout="wide")
+st.set_page_config(page_title="DHL Balanced Strategy Sim", layout="wide")
 
-# --- 1. DEFINE STRATEGIC VARIABLES ---
+# --- 1. THE HYBRID LOGIC ---
+# We balance Cost (Off-Peak) vs. Service Level (Peak)
 STRATEGY_MAP = {
-    0: "Peak Hour Road (Traditional)",
-    1: "Non-Peak Road (Proposed - Cost Leadership)",
-    2: "Peak Air Traffic (Traditional)",
-    3: "Non-Peak Air Traffic (Proposed - Responsiveness)"
+    0: "Standard Peak (High Cost, High Speed)",
+    1: "Strategic Off-Peak (Low Cost, Slower)",
 }
 
-# --- 2. REINFORCEMENT LEARNING ENGINE ---
-class DHL_RL_Agent:
-    def __init__(self, actions, lr=0.1, gamma=0.9, epsilon=0.2):
-        self.actions = actions
-        self.lr = lr
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.q_table = np.zeros((2, len(actions)))
+class Balanced_DHL_Agent:
+    def __init__(self, actions):
+        self.q_table = np.zeros((2, len(actions))) # 0: Normal, 1: High Demand
+        self.lr, self.gamma, self.eps = 0.1, 0.9, 0.2
 
-    def choose_action(self, state):
-        if np.random.uniform(0, 1) < self.epsilon:
-            return np.random.choice(self.actions)
-        return int(np.argmax(self.q_table[state]))
-
-    def learn(self, state, action, reward, next_state):
+    def learn(self, state, action, reward):
         predict = self.q_table[state, action]
-        target = reward + self.gamma * np.max(self.q_table[next_state])
+        target = reward + self.gamma * np.max(self.q_table[state])
         self.q_table[state, action] += self.lr * (target - predict)
 
-# --- 3. UI & FINANCIAL PARAMETERS ---
-st.title("💰 DHL Strategy: Financial Impact Simulation")
-st.markdown("Comparing **Actual Operations** vs. **Proposed Time-Bound Strategy** using RL.")
+# --- 2. UI SETUP ---
+st.title("⚖️ DHL Strategic Balance: Cost vs. Responsiveness")
+st.markdown("This simulation finds the **optimal mix** of Peak vs. Non-Peak operations to maximize profit without losing customers.")
 
-st.sidebar.header("Economic Inputs")
-fuel_cost_per_liter = st.sidebar.number_input("Jet Fuel Cost ($/Liter)", value=1.10)
-labor_cost_per_hour = st.sidebar.number_input("Driver/Pilot Labor ($/Hour)", value=45.0)
-daily_volume = st.sidebar.slider("Daily Shipment Volume", 5000, 50000, 15000)
+col_a, col_b = st.columns(2)
+with col_a:
+    target_offpeak = st.slider("Target Off-Peak Shift (%)", 0, 100, 30, help="What % of volume do you WANT to move to save money?")
+with col_b:
+    sla_penalty = st.slider("SLA Breach Penalty ($)", 10, 500, 150, help="Cost of losing a customer because of a late peak delivery.")
 
-# Initialize Agent
-agent = DHL_RL_Agent(actions=list(STRATEGY_MAP.keys()))
-total_actual_cost = 0
-total_proposed_cost = 0
+# --- 3. THE BALANCING ACT (Simulation) ---
+agent = Balanced_DHL_Agent(actions=[0, 1])
+actual_costs, proposed_costs = [], []
 
-# --- 4. SIMULATION LOOP (Financial Calculation) ---
-for _ in range(500): # Training episodes
-    state = np.random.choice([0, 1]) 
-    action = agent.choose_action(state)
+for i in range(100):
+    state = 1 if i % 5 == 0 else 0 # Every 5th day is "High Demand"
     
-    # Financial Logic
-    # ACTUAL (Peak) - High waste
-    peak_waste = (fuel_cost_per_liter * 1.5) + (labor_cost_per_hour * 1.3)
-    # PROPOSED (Non-Peak) - Optimized
-    off_peak_save = (fuel_cost_per_liter * 1.0) + (labor_cost_per_hour * 1.0)
+    # 1. ACTUAL (Static - Always Peak)
+    # Cost = Base + Traffic Waste ($50)
+    actual_day_cost = 100 + 50 
+    actual_costs.append(actual_day_cost)
     
-    if action in [1, 3]: # Proposed Actions
-        reward = 20 
-        total_proposed_cost += off_peak_save * (daily_volume / 1000)
-    else: # Actual/Peak Actions
-        reward = -10
-        total_actual_cost += peak_waste * (daily_volume / 1000)
+    # 2. PROPOSED (RL Agent decides the mix)
+    # If the Agent chooses Off-Peak (1) on a High Demand day, it gets a heavy SLA Penalty.
+    # If it stays in Peak (0), it pays the Traffic Waste but saves the customer.
+    action = 1 if np.random.rand() < (target_offpeak/100) else 0
+    
+    if state == 1 and action == 1: # BAD BALANCE: Moved too much to off-peak during high demand
+        reward = -sla_penalty
+        day_cost = 70 + sla_penalty 
+    elif action == 1: # GOOD BALANCE: Successfully saved money on a normal day
+        reward = 30 # Saving on fuel/labor
+        day_cost = 70
+    else: # SAFE: Stayed in peak to ensure responsiveness
+        reward = 5
+        day_cost = 150 
         
-    agent.learn(state, action, reward, next_state=0)
+    agent.learn(state, action, reward)
+    proposed_costs.append(day_cost)
 
-# --- 5. RESULTS DISPLAY ---
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("Financial Comparison (Daily OpEx)")
-    comparison_df = pd.DataFrame({
-        "Strategy": ["Actual (Peak-Heavy)", "Proposed (Time-Bound)"],
-        "Daily Cost ($)": [total_actual_cost / 500, total_proposed_cost / 500]
-    })
-    fig_money = px.bar(comparison_df, x="Strategy", y="Daily Cost ($)", 
-                       color="Strategy", color_discrete_map={"Actual (Peak-Heavy)": "#D40511", "Proposed (Time-Bound)": "#00A94F"})
-    st.plotly_chart(fig_money, use_container_width=True)
-
-with col2:
-    savings = (total_actual_cost - total_proposed_cost) / 500
-    st.metric("Potential Daily Savings", f"${savings:,.2f}", delta="Optimized")
-    st.write("**Strategy Analysis:**")
-    st.write("- **Road:** Non-peak avoids $20\%$ fuel waste from idling.")
-    st.write("- **Air:** Non-peak air avoids runway 'holding patterns' which cost ~$1,000/hr in fuel.")
-
+# --- 4. DATA VISUALIZATION ---
 st.divider()
-st.subheader("Learned Optimal Strategy (Q-Table)")
-q_df = pd.DataFrame(agent.q_table, columns=STRATEGY_MAP.values(), index=["Normal Day", "Congested Day"])
-st.dataframe(q_df.style.highlight_max(axis=1, color='#FFCC00'))
+c1, c2 = st.columns(2)
+
+with c1:
+    st.subheader("Cumulative Operational Expense")
+    fig = px.area(x=list(range(100)), y=[np.cumsum(actual_costs), np.cumsum(proposed_costs)],
+                 labels={"x": "Days", "value": "Total Cost ($)"},
+                 title="Total Spending: Traditional vs. Balanced Hybrid",
+                 color_discrete_sequence=['#D40511', '#00A94F'])
+    st.plotly_chart(fig, use_container_width=True)
+
+with c2:
+    total_save = sum(actual_costs) - sum(proposed_costs)
+    st.metric("Total Strategy Savings", f"${total_save:,.2f}", 
+              delta="Target Reached" if total_save > 0 else "Inefficient Mix")
+    st.info("""
+    **The Balance Result:**
+    - **Peak:** Used for high-priority Express shipments to maintain 'Responsiveness'.
+    - **Off-Peak:** Used for standard GoGreen shipments to achieve 'Cost Leadership'.
+    """)
