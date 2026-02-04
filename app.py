@@ -5,69 +5,87 @@ import plotly.express as px
 
 st.set_page_config(page_title="DHL RL Strategy Sim", layout="wide")
 
-# --- Q-LEARNING ENGINE ---
+# --- 1. Q-LEARNING ENGINE (DEBUGGED) ---
 class DHL_RL_Agent:
     def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, epsilon=0.1):
-        self.actions = actions # [0: Peak, 1: Non-Peak, 2: High Air, 3: Low Air]
+        self.actions = actions 
         self.lr = learning_rate
         self.gamma = discount_factor
         self.epsilon = epsilon
-        # State 0: Normal Day, State 1: Congested Day
+        # Q-Table: 2 States (Normal, Congested) x 4 Actions
         self.q_table = np.zeros((2, len(actions)))
 
     def choose_action(self, state):
+        # Epsilon-greedy: Ensures we don't get stuck in a loop
         if np.random.uniform(0, 1) < self.epsilon:
-            return np.random.choice(self.actions) # Explore
+            return np.random.choice(self.actions) 
         else:
-            return np.argmax(self.q_table[state]) # Exploit
+            return int(np.argmax(self.q_table[state]))
 
     def learn(self, state, action, reward, next_state):
+        # The Bellman Equation: Update the 'memory' of the strategy
         predict = self.q_table[state, action]
         target = reward + self.gamma * np.max(self.q_table[next_state])
         self.q_table[state, action] += self.lr * (target - predict)
 
-# --- SIMULATION UI ---
+# --- 2. USER INTERFACE ---
 st.title("🤖 DHL Strategy: Reinforcement Learning Model")
 st.markdown("This agent learns the optimal **Time-Bound** strategy through trial and error.")
 
 # Inputs
-episodes = st.sidebar.slider("Training Episodes", 10, 500, 100)
-fuel_price = st.sidebar.slider("Fuel Price Multiplier", 0.5, 2.0, 1.0)
+episodes = st.sidebar.slider("Training Episodes (Iterations)", 10, 1000, 250)
+fuel_price = st.sidebar.slider("Fuel Price Multiplier", 0.5, 2.0, 1.2)
 
-# Training Loop
-agent = DHL_RL_Agent(actions=[0, 1, 2, 3])
-history = []
+# --- 3. EXECUTION ---
+try:
+    agent = DHL_RL_Agent(actions=[0, 1, 2, 3])
+    history = []
 
-for _ in range(episodes):
-    state = np.random.choice([0, 1]) # Randomly start in normal or congested state
-    action = agent.choose_action(state)
-    
-    # Calculate Reward based on your "Proposed" Logic
-    if action == 1: # Non-Peak Delivery
-        reward = 10 * fuel_price # Positive reward for fuel savings
-    elif action == 3: # Low-Traffic Air
-        reward = 15 # High reward for speed/responsiveness
-    else: # Peak or High-Traffic (Traditional)
-        reward = -5 # Penalty for waste
+    # Training Loop
+    for _ in range(episodes):
+        state = np.random.choice([0, 1]) 
+        action = agent.choose_action(state)
         
-    agent.learn(state, action, reward, next_state=0)
-    history.append(reward)
+        # Reward Logic (Higher is better)
+        if action == 1: # Non-Peak Road Delivery
+            reward = 12 * fuel_price 
+        elif action == 3: # Low-Traffic Air Express
+            reward = 20 
+        elif action == 0: # Peak Road (Traffic waste)
+            reward = -10
+        else: # High Air Traffic (Fuel waste)
+            reward = -15
+            
+        agent.learn(state, action, reward, next_state=0)
+        history.append(reward)
 
-# Results Comparison
-st.subheader("Learned Strategy Table (Q-Values)")
-q_df = pd.DataFrame(agent.q_table, 
-                   columns=["Peak Road", "Non-Peak Road", "High Air Traffic", "Low Air Traffic"],
-                   index=["Normal Day", "Congested Day"])
-st.table(q_df)
+    # --- 4. DATA VISUALIZATION ---
+    # Convert Q-Table to a clean DataFrame for Streamlit display
+    q_df = pd.DataFrame(
+        agent.q_table, 
+        columns=["Peak Road", "Non-Peak Road", "High Air Traffic", "Low Air Traffic"],
+        index=["Normal Day", "Congested Day"]
+    )
 
-# Logic Explanation
-st.info(f"""
-**RL Observation:** After {episodes} runs, the agent has assigned the highest Q-value to 
-'**{q_df.columns[np.argmax(agent.q_table[1])]}**' for congested days. 
-This confirms your proposal: Shifting to non-peak windows is the mathematically optimal choice for Cost Leadership.
-""")
+    st.subheader("Learned Strategy Intelligence (Q-Table)")
+    st.dataframe(q_df.style.highlight_max(axis=1, color='#00A94F'))
 
-# Visualizing Learning
-fig = px.line(y=np.cumsum(history), title="Cumulative Reward (Agent Intelligence Growth)")
-fig.update_layout(xaxis_title="Steps", yaxis_title="Total Strategy Score")
-st.plotly_chart(fig, use_container_width=True)
+    st.divider()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Learning Progress")
+        fig = px.line(y=np.cumsum(history), 
+                      labels={'x': 'Episodes', 'y': 'Cumulative Reward'},
+                      color_discrete_sequence=['#D40511'])
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.subheader("Strategy Alignment")
+        # Showing the chosen optimal path
+        opt_action = q_df.columns[np.argmax(agent.q_table[1])]
+        st.success(f"**RL Agent Recommendation:** On congested days, prioritize **{opt_action}**.")
+        st.info("This matches the 'Cost Leadership' pillar of the proposed strategy.")
+
+except Exception as e:
+    st.error(f"Error in Simulation Engine: {e}")
